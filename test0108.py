@@ -2,46 +2,39 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
-import plotly.express as px # 新增 Plotly Express 用於圓餅圖
+import plotly.express as px
 
-# --- 1. 頁面配置與動態深色風格 ---
-st.set_page_config(page_title="Galaxy Stock Tracker", layout="wide", page_icon="🚀")
+# --- 1. 頁面配置與淺色風格 ---
+st.set_page_config(page_title="股票資產追蹤器 (Light Mode)", layout="wide", page_icon="📈")
 
 st.markdown("""
     <style>
-    /* 動態漸層背景 */
-    body {
-        background: linear-gradient(-45deg, #0e1117, #1a2233, #0a101d, #1f2a3a);
-        background-size: 400% 400%;
-        animation: gradientBG 15s ease infinite;
-        color: #ffffff;
+    /* 淺色背景與科技感元件 */
+    .stApp { background-color: #f8f9fa; color: #212529; }
+    .stMetric { 
+        background-color: #ffffff; 
+        border-radius: 12px; 
+        padding: 20px; 
+        border: 1px solid #dee2e6; 
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05); 
     }
-    @keyframes gradientBG {
-        0% { background-position: 0% 50%; }
-        50% { background-position: 100% 50%; }
-        100% { background-position: 0% 50%; }
+    [data-testid="stExpander"] { 
+        background-color: #ffffff; 
+        border: 1px solid #dee2e6; 
+        border-radius: 10px; 
     }
-
-    /* Streamlit 元素基礎樣式 */
-    .main { background-color: rgba(14, 17, 23, 0.7); border-radius: 10px; padding: 20px; box-shadow: 0 8px 16px rgba(0,0,0,0.5); }
-    .stMetric { background-color: #1b212c; border-radius: 10px; padding: 15px; border: 1px solid #30363d; box-shadow: 0 4px 8px rgba(0,0,0,0.4); }
-    [data-testid="stExpander"] { background-color: #161b22; border: 1px solid #30363d; border-radius: 8px; margin-bottom: 10px; }
-    .stTextInput>div>div>input { background-color: #0e1117; color: white; border-color: #30363d; }
-    .stButton>button { background-color: #2e86de; color: white; border: none; border-radius: 5px; padding: 10px 20px; font-weight: bold; }
-    .stButton>button:hover { background-color: #1e6ec7; }
-    h1, h2, h3, h4, h5, h6 { color: #00bcd4; } /* 標題顏色 */
+    .stButton>button { border-radius: 20px; }
+    h1, h2 { color: #003566; font-weight: 700; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. 匯率獲取 (加入快取避免被封鎖) ---
-@st.cache_data(ttl=1800) # 每半小時更新一次匯率
+# --- 2. 匯率獲取 ---
+@st.cache_data(ttl=1800)
 def get_usd_twd_rate():
     try:
         ticker = yf.Ticker("TWD=X")
         data = ticker.history(period="1d")
-        if not data.empty:
-            return data['Close'].iloc[-1]
-        return 32.5
+        return data['Close'].iloc[-1] if not data.empty else 32.5
     except:
         return 32.5
 
@@ -49,146 +42,129 @@ current_rate = get_usd_twd_rate()
 
 # --- 3. 初始化 Session State ---
 if 'portfolio' not in st.session_state:
+    # 欄位：代號, 成本價, 股數, 幣別
     st.session_state.portfolio = pd.DataFrame(columns=['代號', '成本價', '股數', '幣別'])
 
 # --- 4. 側邊欄 ---
 with st.sidebar:
-    st.title("🛰️ 持股管理中心")
+    st.header("➕ 新增持股")
     with st.form("stock_input", clear_on_submit=True):
-        raw_ticker = st.text_input("股票代號", placeholder="例如: 2330 或 NVDA").upper().strip()
+        raw_ticker = st.text_input("股票代號", placeholder="例如: 2330 或 TSLA").upper().strip()
         
-        # 自動識別
         if raw_ticker.isdigit():
-            final_ticker = f"{raw_ticker}.TW"
-            default_curr = "TWD"
+            final_ticker, default_curr = f"{raw_ticker}.TW", "TWD"
         else:
-            final_ticker = raw_ticker
-            default_curr = "USD"
+            final_ticker, default_curr = raw_ticker, "USD"
             
-        buy_p = st.number_input(f"買入成本", min_value=0.0, format="%.2f")
+        buy_p = st.number_input("平均成本", min_value=0.0, format="%.2f")
         shares = st.number_input("持有股數", min_value=1, step=1)
         
-        if st.form_submit_button("🚀 同步至終端"):
+        if st.form_submit_button("確認加入"):
             if final_ticker:
-                new_data = pd.DataFrame([[final_ticker, buy_p, shares, default_curr]], 
-                                       columns=['代號', '成本價', '股數', '幣別'])
+                new_row = pd.DataFrame([[final_ticker, buy_p, shares, default_curr]], 
+                                     columns=['代號', '成本價', '股數', '幣別'])
+                # 更新機制
                 st.session_state.portfolio = pd.concat([
                     st.session_state.portfolio[st.session_state.portfolio['代號'] != final_ticker], 
-                    new_data
+                    new_row
                 ], ignore_index=True)
                 st.rerun()
-
-    if st.button("🗑️ 清空所有數據庫"):
-        st.session_state.portfolio = pd.DataFrame(columns=['代號', '成本價', '股數', '幣別'])
-        st.rerun()
     
-    st.markdown(f"---")
-    st.write(f"🌍 現時匯率 **1 USD = {current_rate:.2f} TWD**")
-    st.markdown("---") # 分隔線
-    st.markdown("💡 <span style='color:#00bcd4;'>輸入台股代號 (如: 2330) 將自動設為 TWD。</span>", unsafe_allow_html=True)
-    st.markdown("💡 <span style='color:#00bcd4;'>輸入美股代號 (如: NVDA) 將自動設為 USD。</span>", unsafe_allow_html=True)
+    st.write(f"💵 匯率參考: **1 USD = {current_rate:.2f} TWD**")
 
-
-# --- 5. 主畫面：資產總覽與分佈圖 ---
-st.title("🌌 全球資產即時監測終端")
+# --- 5. 主畫面 ---
+st.title("🛡️ 投資組合監控中心")
 
 if st.session_state.portfolio.empty:
-    st.info("請從左側選單輸入代號以啟動追蹤系統。")
+    st.info("目前沒有持股數據。請利用左側選單新增股票。")
 else:
-    total_value_twd = 0.0
-    total_profit_twd = 0.0
+    # 準備整理匯總表格的列表
+    summary_list = []
+    total_val_twd = 0.0
+    total_prof_twd = 0.0
+
+    # 頂部即時數據區
+    col_stat1, col_stat2 = st.columns(2)
+    stat_placeholder1 = col_stat1.empty()
+    stat_placeholder2 = col_stat2.empty()
+
+    st.subheader("📋 各股詳細趨勢")
     
-    # 用於資產分佈圖的資料
-    currency_distribution = {"USD": 0.0, "TWD": 0.0}
-    
-    summary_placeholder = st.empty()
-    st.divider()
-
-    # 執行進度條
-    with st.spinner('正在同步全球股市數據...'):
-        for idx, row in st.session_state.portfolio.iterrows():
-            t = row['代號']
-            stock = yf.Ticker(t)
-            
-            try:
-                # 抓取股價與歷史
-                df = stock.history(period="1mo")
-                if df.empty: 
-                    st.warning(f"⚠️ 無法取得 {t} 股價資訊或資料為空。")
-                    continue
-                now_price = df['Close'].iloc[-1]
-                
-                # 安全獲取基本資料
-                c_name, c_desc, logo_url = t, "無公司資訊", ""
-                try:
-                    info = stock.info
-                    c_name = info.get('longName', t)
-                    c_desc = info.get('longBusinessSummary', '暫無簡介')[:180] + "..." if info.get('longBusinessSummary') else "暫無簡介"
-                    domain = info.get('website', '').split('//')[-1].split('/')[0] if info.get('website') else ""
-                    if domain: logo_url = f"https://logo.clearbit.com/{domain}"
-                except: pass
-
-                # 損益計算
-                fx = current_rate if row['幣別'] == "USD" else 1.0
-                val_twd = (now_price * row['股數']) * fx
-                cost_twd = (row['成本價'] * row['股數']) * fx
-                diff_twd = val_twd - cost_twd
-                diff_pct = (diff_twd / cost_twd * 100) if cost_twd != 0 else 0
-                
-                total_value_twd += val_twd
-                total_profit_twd += diff_twd
-
-                # 更新資產分佈資料
-                currency_distribution[row['幣別']] += val_twd
-
-                # UI 渲染
-                with st.expander(f"📌 {c_name} | {now_price:.2f} {row['幣別']}"):
-                    c1, c2, c3 = st.columns([1, 1.5, 2.5])
-                    with c1:
-                        if logo_url: st.image(logo_url, width=70)
-                        else: st.write("🏢")
-                        st.caption(f"代號: {t}")
-                    with c2:
-                        st.metric("損益 (TWD)", f"{diff_twd:,.0f}", f"{diff_pct:.2f}%")
-                        st.write(f"現值: NT$ {val_twd:,.0f}")
-                    with c3:
-                        st.write(f"**情報摘要:**")
-                        st.markdown(f"<p style='font-size: 0.9em; color: #bbbbbb;'>{c_desc}</p>", unsafe_allow_html=True)
-
-                    fig = go.Figure(data=[go.Candlestick(
-                        x=df.index, open=df['Open'], high=df['High'], 
-                        low=df['Low'], close=df['Close'],
-                        increasing_line_color= '#00ff88', decreasing_line_color= '#ff3366'
-                    )])
-                    fig.update_layout(template="plotly_dark", height=250, margin=dict(l=0,r=0,b=0,t=0),
-                                      xaxis_rangeslider_visible=False)
-                    st.plotly_chart(fig, use_container_width=True)
-            except Exception as e:
-                st.error(f"數據讀取失敗 {t}: {e}")
-
-    # 顯示頂部總計
-    with summary_placeholder.container():
-        col_total_1, col_total_2, col_pie = st.columns([1, 1, 1.2]) # 分割為三個欄位
-
-        with col_total_1:
-            st.metric("總資產現值 (TWD)", f"NT$ {total_value_twd:,.0f}")
-        with col_total_2:
-            st.metric("預估累計損益 (TWD)", f"NT$ {total_profit_twd:,.0f}", 
-                      f"{(total_profit_twd/total_value_twd*100 if total_value_twd !=0 else 0):.2f}%")
+    # 逐一處理持股
+    for idx, row in st.session_state.portfolio.iterrows():
+        t = row['代號']
+        stock = yf.Ticker(t)
         
-        with col_pie:
-            # 資產分佈圓餅圖
-            pie_data = pd.DataFrame(currency_distribution.items(), columns=['幣別', '市值'])
-            # 過濾掉市值為 0 的幣別，防止圓餅圖出錯
-            pie_data = pie_data[pie_data['市值'] > 0] 
+        try:
+            df = stock.history(period="1mo")
+            if df.empty: continue
+            now_p = df['Close'].iloc[-1]
+            
+            # 計算損益
+            fx = current_rate if row['幣別'] == "USD" else 1.0
+            mkt_val_twd = (now_p * row['股數']) * fx
+            cost_twd = (row['成本價'] * row['股數']) * fx
+            p_l_twd = mkt_val_twd - cost_twd
+            p_l_pct = (p_l_twd / cost_twd * 100) if cost_twd != 0 else 0
+            
+            total_val_twd += mkt_val_twd
+            total_prof_twd += p_l_twd
 
-            if not pie_data.empty:
-                fig_pie = px.pie(pie_data, values='市值', names='幣別', 
-                                 title='資產幣別分佈',
-                                 color_discrete_sequence=['#00bcd4', '#FF5733']) # 自訂顏色
-                fig_pie.update_layout(template="plotly_dark", margin=dict(l=0,r=0,b=0,t=30), height=250,
-                                      title_font_color="#00bcd4")
-                st.plotly_chart(fig_pie, use_container_width=True)
-            else:
-                st.info("尚無資產分佈數據。")
+            # 收集表格數據
+            summary_list.append({
+                "股票代號": t,
+                "幣別": row['幣別'],
+                "持有股數": row['股數'],
+                "平均成本": f"{row['成本價']:.2f}",
+                "目前市價": f"{now_p:.2f}",
+                "損益 (TWD)": round(p_l_twd, 0),
+                "報酬率 (%)": f"{p_l_pct:.2f}%"
+            })
+
+            # UI 面板
+            with st.expander(f"📍 {t} - 現價: {now_p:.2f} {row['幣別']}"):
+                c1, c2, c3 = st.columns([1.5, 2, 1])
+                with c1:
+                    st.metric("持有損益", f"{p_l_twd:,.0f} TWD", f"{p_l_pct:.2f}%")
+                with c2:
+                    # K線圖
+                    fig = go.Figure(data=[go.Candlestick(
+                        x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close']
+                    )])
+                    fig.update_layout(template="plotly_white", height=200, margin=dict(l=0,r=0,b=0,t=0), xaxis_rangeslider_visible=False)
+                    st.plotly_chart(fig, use_container_width=True)
+                with c3:
+                    # --- 刪除功能 ---
+                    st.write("") 
+                    if st.button(f"🗑️ 刪除 {t}", key=f"del_{t}"):
+                        st.session_state.portfolio = st.session_state.portfolio[st.session_state.portfolio['代號'] != t]
+                        st.rerun()
+
+        except Exception as e:
+            st.error(f"讀取 {t} 出錯")
+
+    # 更新頂部指標
+    stat_placeholder1.metric("總資產價值 (TWD)", f"NT$ {total_val_twd:,.0f}")
+    stat_placeholder2.metric("總累計損益 (TWD)", f"NT$ {total_prof_twd:,.0f}", f"{(total_prof_twd/total_val_twd*100 if total_val_twd!=0 else 0):.2f}%")
+
+    # --- 6. 底部匯總表格 ---
+    st.divider()
+    st.subheader("📊 投資組合彙整表")
+    if summary_list:
+        summary_df = pd.DataFrame(summary_list)
+        # 設定顏色高亮
+        def color_profit(val):
+            if isinstance(val, (int, float)):
+                color = '#d00000' if val < 0 else '#008000'
+                return f'color: {color}'
+            return ''
+            
+        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+    
+    # 資產分佈圓餅圖
+    st.write("")
+    if summary_list:
+        fig_pie = px.pie(summary_df, values='損益 (TWD)', names='股票代號', title='各股損益佔比圖', hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
+        fig_pie.update_layout(template="plotly_white")
+        st.plotly_chart(fig_pie, use_container_width=True)
 

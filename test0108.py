@@ -13,7 +13,6 @@ st.markdown("""
     .stApp { background-color: #f8f9fa; color: #212529; }
     .stMetric { background-color: #ffffff; border-radius: 12px; padding: 20px; border: 1px solid #dee2e6; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
     [data-testid="stExpander"] { background-color: #ffffff; border: 1px solid #dee2e6; border-radius: 10px; }
-    .stDataFrame { background-color: #ffffff; border-radius: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -28,18 +27,13 @@ def load_data():
 def save_data(df):
     df.to_csv(DB_FILE, index=False)
 
-# --- 3. 即時匯率獲取 (追蹤最新匯價) ---
-@st.cache_data(ttl=300) # 每 5 分鐘自動更新一次最新匯率
+# --- 3. 即時匯率獲取 ---
+@st.cache_data(ttl=300)
 def get_live_usd_twd():
     try:
-        # 抓取即時匯率 (TWD=X)
         ticker = yf.Ticker("TWD=X")
-        # 抓取最近 1 天內、1 分鐘層級的資料
         data = ticker.history(period="1d", interval="1m")
-        if not data.empty:
-            # 取得最後一筆成交價
-            return data['Close'].iloc[-1]
-        return 32.5
+        return data['Close'].iloc[-1] if not data.empty else 32.5
     except:
         return 32.5
 
@@ -55,26 +49,27 @@ with st.sidebar:
     st.markdown(f"🕒 **即時匯率 USD/TWD: `{latest_rate:.4f}`**")
     
     with st.form("input_form", clear_on_submit=True):
-        raw_in = st.text_input("股票代號", placeholder="台股數字 / 美股代碼 / 興櫃號碼").strip()
+        raw_in = st.text_input("股票代號", placeholder="例如: 2330 或 8069.TWO").strip()
         c_name = st.text_input("公司名稱 (可填中文)")
         
-        is_numeric = raw_in.isdigit()
+        # 關鍵判斷邏輯
+        is_tw_asset = raw_in.isdigit() or raw_in.upper().endswith(('.TW', '.TWO'))
+        
         mode = st.selectbox("追蹤模式", ["自動 (Yahoo Finance)", "手動 (興櫃/自訂)"])
         
         if mode == "自動 (Yahoo Finance)":
-            if is_numeric:
+            if raw_in.isdigit():
                 final_t, curr = f"{raw_in}.TW", "TWD"
             else:
-                final_t, curr = raw_in.upper(), "USD"
+                final_t, curr = raw_in.upper(), ("TWD" if is_tw_asset else "USD")
             manual_p = 0.0
         else:
             final_t = raw_in
-            if is_numeric:
-                curr = "TWD"
-                st.caption("✅ 已自動設為台幣計價")
-            else:
-                curr = st.selectbox("計價幣別", ["USD", "TWD"])
+            curr = "TWD" if is_tw_asset else st.selectbox("計價幣別", ["USD", "TWD"])
             manual_p = st.number_input("目前市價 (補登)", min_value=0.0, format="%.2f")
+
+        if is_tw_asset:
+            st.caption("✅ 偵測為台灣市場資產，幣別強制設定為 **TWD**")
 
         buy_p = st.number_input("平均買入成本", min_value=0.0, format="%.2f")
         shares = st.number_input("持有股數", min_value=1, step=1)
@@ -96,7 +91,7 @@ with st.sidebar:
 st.title("🌌 投資全景監控")
 
 if st.session_state.portfolio.empty:
-    st.info("👋 系統就緒。請在側邊欄登錄資產，匯率每 5 分鐘自動同步最新報價。")
+    st.info("👋 系統就緒。代號含 .TW 或 .TWO 之資產已自動鎖定為台幣計價。")
 else:
     summary_data = []
     total_val_twd, total_cost_twd = 0.0, 0.0
@@ -109,10 +104,10 @@ else:
         now_p, disp_name, logo_url = 0.0, row['自訂名稱'], ""
         df_hist = pd.DataFrame()
 
-        # 獲取價格與 Logo
         if not is_manual:
             try:
                 stock = yf.Ticker(t)
+                # 嘗試自動修正 .TWO 資料獲取
                 df_hist = stock.history(period="1mo")
                 if not df_hist.empty:
                     now_p = df_hist['Close'].iloc[-1]
@@ -127,7 +122,7 @@ else:
             now_p = row['手動市價']
             disp_name = disp_name or t
 
-        # 即時損益計算 (美金資產使用最新匯率換算)
+        # 即時損益計算 (強制判定)
         fx = latest_rate if row['幣別'] == "USD" else 1.0
         m_val_twd = (now_p * row['股數']) * fx
         c_val_twd = (row['成本價'] * row['股數']) * fx
@@ -137,18 +132,17 @@ else:
         total_val_twd += m_val_twd
         total_cost_twd += c_val_twd
 
-        # 渲染單股 Expander
         with st.expander(f"{'🔴' if is_manual else '🔵'} {disp_name} ({t})"):
             c1, c2, c3 = st.columns([1, 3, 1.2])
             with c1:
                 if logo_url: st.image(logo_url, width=60)
                 st.metric("損益 (TWD)", f"{profit_twd:,.0f}", f"{roi:.2f}%")
+                st.caption(f"結算幣別: {row['幣別']}")
             with c2:
                 if not df_hist.empty:
                     fig = go.Figure(data=[go.Candlestick(x=df_hist.index, open=df_hist['Open'], high=df_hist['High'], low=df_hist['Low'], close=df_hist['Close'])])
                     fig.update_layout(template="plotly_white", height=180, margin=dict(l=0,r=0,b=0,t=0), xaxis_rangeslider_visible=False)
                     st.plotly_chart(fig, use_container_width=True)
-                else: st.caption("手動模式/興櫃股：無即時圖表")
             with c3:
                 if is_manual:
                     new_p = st.number_input("更新市價", value=float(now_p), key=f"p_{t}")
@@ -172,14 +166,14 @@ else:
             "報酬率": f"{roi:.2f}%"
         })
 
-    # 總結結算
+    # 結算數據
     st.divider()
     col_a, col_b = st.columns(2)
-    col_a.metric("總市值 (台幣折算)", f"NT$ {total_val_twd:,.0f}")
+    col_a.metric("總市值 (折算台幣)", f"NT$ {total_val_twd:,.0f}")
     t_roi = (total_val_twd - total_cost_twd) / total_cost_twd * 100 if total_cost_twd != 0 else 0
     col_b.metric("累計總損益", f"NT$ {(total_val_twd - total_cost_twd):,.0f}", f"{t_roi:.2f}%")
 
-    # --- 最終匯總表 (帶 Logo) ---
+    # --- 彙整表 (帶 Logo) ---
     st.subheader("📊 投資組合彙整清單")
     summary_df = pd.DataFrame(summary_data)
     st.dataframe(
@@ -191,8 +185,5 @@ else:
         },
         use_container_width=True, hide_index=True
     )
-    
-    # 佔比圖
-    fig_pie = px.pie(summary_df, values='損益 (TWD)', names='名稱', hole=0.3, title="獲利貢獻分佈")
-    st.plotly_chart(fig_pie, use_container_width=True)
+
 

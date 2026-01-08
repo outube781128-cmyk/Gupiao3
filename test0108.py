@@ -7,19 +7,27 @@ import os
 import requests
 from bs4 import BeautifulSoup
 
-# --- 1. 頁面配置 ---
-st.set_page_config(page_title="股票即時監控", layout="wide", page_icon="🏛️")
+# --- 1. 頁面配置與黑底白字樣式自定義 ---
+st.set_page_config(page_title="全球資產即時監控", layout="wide", page_icon="🏛️")
 
 st.markdown("""
     <style>
     .stApp { background-color: #f8f9fa; color: #212529; }
-    .stMetric { 
-        background-color: #ffffff; 
-        border-radius: 12px; 
-        padding: 25px; 
-        border: 2px solid #e9ecef; 
-        box-shadow: 0 4px 12px rgba(0,0,0,0.08); 
+    
+    /* 置頂數據卡片：黑底白字 */
+    .top-metric-card {
+        background-color: #1e1e1e;
+        color: #ffffff;
+        border-radius: 12px;
+        padding: 25px;
+        text-align: center;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        margin-bottom: 20px;
     }
+    .top-metric-label { font-size: 1rem; color: #b0b0b0; margin-bottom: 10px; }
+    .top-metric-value { font-size: 1.8rem; font-weight: 700; color: #ffffff; }
+    .top-metric-delta { font-size: 1.1rem; margin-top: 5px; }
+
     [data-testid="stExpander"] { background-color: #ffffff; border-radius: 10px; margin-bottom: 8px; }
     </style>
     """, unsafe_allow_html=True)
@@ -46,12 +54,11 @@ def get_smart_logo(ticker_obj, ticker_id):
         return f"https://logo.clearbit.com/{ticker_id.split('.')[0].lower()}.com"
     return ""
 
-# --- 3. 數據庫與匯率 (強化空值處理) ---
+# --- 3. 數據庫與匯率 ---
 DB_FILE = "portfolio_master.csv"
 def load_db():
     if os.path.exists(DB_FILE):
         df = pd.read_csv(DB_FILE)
-        # 將所有空值轉為空字串，避免顯示時報錯
         df = df.fillna("")
         cols = ['代號', '名稱', '成本價', '股數', '幣別', '模式', '手動市價', 'Logo連結']
         for col in cols:
@@ -100,7 +107,6 @@ with st.sidebar:
                     try: final_name = yf.Ticker(final_ticker).info.get('shortName', final_ticker)
                     except: final_name = final_ticker
                 
-                # 確保 Logo 連結若為空則存為空字串而非 nan
                 final_logo = c_logo if c_logo else get_smart_logo(yf.Ticker(final_ticker), final_ticker)
                 if not final_logo: final_logo = ""
                 
@@ -149,51 +155,74 @@ else:
 
         summary_list.append({
             "idx": idx, "Logo": str(row['Logo連結']), "名稱": row['名稱'], "代號": t, 
-            "持股數": row['股數'], "平均成本": row['成本價'], "目前市價": now_p,
-            "投入金額(TWD)": c_val, "目前價值(TWD)": m_val, 
-            "損益(TWD)": profit, "報酬率": roi, "歷史資料": hist_df
+            "持股數": row['股數'], "平均成本": round(row['成本價'], 2), "目前市價": round(now_p, 2),
+            "投入金額(TWD)": round(c_val, 2), "目前價值(TWD)": round(m_val, 2), 
+            "損益(TWD)": round(profit, 2), "報酬率": round(roi, 2), "歷史資料": hist_df
         })
 
-    # 置頂數據
-    m1, m2 = st.columns(2)
-    m1.metric("💰 總資產市值 (TWD)", f"NT$ {total_mkt_twd:,.0f}")
+    # --- TOP METRICS (黑底白字自定義 HTML) ---
     t_profit = total_mkt_twd - total_cost_twd
     t_roi = (t_profit / total_cost_twd * 100) if total_cost_twd != 0 else 0
-    m2.metric("📈 總累計損益", f"NT$ {t_profit:,.0f}", f"{t_roi:.2f}%")
+    delta_color = "#00ff00" if t_profit >= 0 else "#ff4b4b"
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown(f"""
+            <div class="top-metric-card">
+                <div class="top-metric-label">💰 總資產市值 (TWD)</div>
+                <div class="top-metric-value">NT$ {total_mkt_twd:,.2f}</div>
+            </div>
+        """, unsafe_allow_html=True)
+    with col2:
+        st.markdown(f"""
+            <div class="top-metric-card">
+                <div class="top-metric-label">📈 總累計損益</div>
+                <div class="top-metric-value">NT$ {t_profit:,.2f}</div>
+                <div class="top-metric-delta" style="color: {delta_color};">
+                    {'+' if t_profit >= 0 else ''}{t_roi:.2f}%
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
     
     st.divider()
 
-    # 持股明細卡片 (解決 Logo 報錯關鍵)
+    # 持股明細卡片
     for item in summary_list:
         with st.expander(f"{item['名稱']} ({item['代號']})"):
             c1, c2, c3 = st.columns([1, 2.5, 1.2])
             with c1:
-                # 修正處：檢查字串長度與是否為有效網址開頭
                 logo_path = item['Logo']
                 if logo_path and logo_path.startswith("http"):
-                    try:
-                        st.image(logo_path, width=65)
-                    except:
-                        st.caption("🏢 (Logo 無法載入)")
-                else:
-                    st.caption("🏢 (未設定 Logo)")
-                
-                st.metric("損益", f"{item['損益(TWD)']:,.0f}", f"{item['報酬率']:.2f}%")
-            
+                    try: st.image(logo_path, width=65)
+                    except: st.caption("🏢 (Logo Error)")
+                else: st.caption("🏢 (No Logo)")
+                st.metric("損益", f"{item['損益(TWD)']:,.2f}", f"{item['報酬率']:.2f}%")
             with c2:
                 if not item['歷史資料'].empty:
                     fig = go.Figure(data=[go.Candlestick(x=item['歷史資料'].index, open=item['歷史資料']['Open'], high=item['歷史資料']['High'], low=item['歷史資料']['Low'], close=item['歷史資料']['Close'])])
                     fig.update_layout(template="plotly_white", height=180, margin=dict(l=0,r=0,b=0,t=0), xaxis_rangeslider_visible=False)
                     st.plotly_chart(fig, use_container_width=True)
-            
             with c3:
                 if st.button("🗑️ 刪除", key=f"del_{item['idx']}"):
                     st.session_state.portfolio = st.session_state.portfolio.drop(item['idx'])
                     save_db(st.session_state.portfolio)
                     st.rerun()
 
-    # 底部總表
+    # 底部彙整總表
     st.divider()
+    st.subheader("📊 投資組合彙整總表")
     sum_df = pd.DataFrame(summary_list).drop(columns=['歷史資料', 'idx'])
-    st.dataframe(sum_df, column_config={"Logo": st.column_config.ImageColumn("標誌")}, use_container_width=True, hide_index=True)
-
+    
+    st.dataframe(
+        sum_df, 
+        column_config={
+            "Logo": st.column_config.ImageColumn("標誌", width="small"),
+            "平均成本": st.column_config.NumberColumn(format="%.2f"),
+            "目前市價": st.column_config.NumberColumn(format="%.2f"),
+            "投入金額(TWD)": st.column_config.NumberColumn(format="NT$ %.2f"),
+            "目前價值(TWD)": st.column_config.NumberColumn(format="NT$ %.2f"),
+            "損益(TWD)": st.column_config.NumberColumn(format="NT$ %.2f"),
+            "報酬率": st.column_config.NumberColumn(format="%.2f%%") # 這裡確保了百分比顯示
+        }, 
+        use_container_width=True, hide_index=True
+    )

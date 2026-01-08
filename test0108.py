@@ -73,7 +73,7 @@ with st.sidebar:
     st.write(f"💵 匯率參考: **1 USD = {current_rate:.2f} TWD**")
 
 # --- 5. 主畫面 ---
-st.title("🛡️ 投資組合監控中心")
+st.title("🛡️ 投資組合追蹤系統")
 
 if st.session_state.portfolio.empty:
     st.info("目前沒有持股數據。請利用左側選單新增股票。")
@@ -167,4 +167,5 @@ else:
         fig_pie = px.pie(summary_df, values='損益 (TWD)', names='股票代號', title='各股損益佔比圖', hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
         fig_pie.update_layout(template="plotly_white")
         st.plotly_chart(fig_pie, use_container_width=True)
+
 

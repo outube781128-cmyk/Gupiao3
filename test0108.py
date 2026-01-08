@@ -8,7 +8,7 @@ import requests
 from bs4 import BeautifulSoup
 
 # --- 1. 頁面配置 ---
-st.set_page_config(page_title="全球資產即時監控", layout="wide", page_icon="🏛️")
+st.set_page_config(page_title="股票即時監控", layout="wide", page_icon="🏛️")
 
 st.markdown("""
     <style>
@@ -196,3 +196,4 @@ else:
     st.divider()
     sum_df = pd.DataFrame(summary_list).drop(columns=['歷史資料', 'idx'])
     st.dataframe(sum_df, column_config={"Logo": st.column_config.ImageColumn("標誌")}, use_container_width=True, hide_index=True)
+
